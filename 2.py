@@ -8,8 +8,8 @@ import requests # Required for Road-Routing API (OSRM)
 
 # TECHNICAL NOTE: 
 # This application implements a Multi-Depot Vehicle Routing Problem (MDVRP) logic.
-# Enhanced Feature: Dynamic Warehouse Status (Active/Closed).
-# 1. Assignment: Customers are mapped to the nearest ACTIVE warehouse.
+# Enhanced Feature: Dynamic Warehouse Status (Active/Closed) & 25km Service Radius.
+# 1. Assignment: Customers are mapped to the nearest ACTIVE warehouse within 25km.
 # 2. Routing: Independent Greedy Nearest Neighbor routes per active depot.
 # 3. Pathfinding: OSRM API for real-world road navigation.
 
@@ -26,6 +26,7 @@ class DeliveryRoutePlanner:
             "accent": "#00a8ff",    # Warehouse Blue
             "success": "#00d2ad",   # Route Green
             "customer": "#ff9f43",  # Customer Orange
+            "warning": "#ff9f43",   # Warning Orange (Added to fix KeyError)
             "text": "#e0e0e0",
             "text_dim": "#a0a0a0",
             "border": "#333338",
@@ -37,6 +38,7 @@ class DeliveryRoutePlanner:
         self.root.configure(bg=self.colors["bg"])
         
         # Logic & State Variables
+        self.MAX_SERVICE_RADIUS = 25.0 # Max distance from Warehouse to Customer in KM
         self.warehouse_coords = (12.8231, 80.0442) # SRM KTR Default
         # Locations now include 'active' status for Warehouses
         self.locations = [{"name": "Primary Warehouse", "lat": self.warehouse_coords[0], "lng": self.warehouse_coords[1], "type": "Warehouse", "active": True}]
@@ -151,6 +153,7 @@ class DeliveryRoutePlanner:
         self.log_text = tk.Text(log_card, height=8, bg="#121214", fg=self.colors["success"], 
                                 font=("Consolas", 10), relief="flat", padx=10, pady=10)
         self.log_text.pack(fill=tk.X)
+        self.log_text.tag_configure("warning", foreground=self.colors["warning"])
         self.log_text.insert(tk.END, "> Multi-Depot System Active. Use the Manifest to activate/close warehouses.")
 
         # Markers
@@ -222,23 +225,35 @@ class DeliveryRoutePlanner:
     def solve_multi_depot_assignment(self):
         """
         EXPERT LOGIC: Assignment-First, Route-Second.
-        Filters for ACTIVE warehouses only.
+        Filters for ACTIVE warehouses only and enforces 25km radius.
+        Returns (final_routes, unserviceable_customers)
         """
         active_warehouses = [loc for loc in self.locations if loc['type'] == "Warehouse" and loc.get('active', True)]
         customers = [loc for loc in self.locations if loc['type'] == "Customer"]
         
         if not active_warehouses:
-            return None
+            return None, []
         
         assignments = {i: [] for i in range(len(active_warehouses))}
+        unserviceable = []
         
-        # Step 1: Assignment Heuristic (to nearest active warehouse)
+        # Step 1: Assignment Heuristic (to nearest active warehouse within 25km)
         for cust in customers:
-            nearest_idx = min(range(len(active_warehouses)), key=lambda i: self.haversine(
-                cust['lat'], cust['lng'], active_warehouses[i]['lat'], active_warehouses[i]['lng']))
-            assignments[nearest_idx].append(cust)
+            # Calculate distances to all active warehouses
+            dist_data = []
+            for i, wh in enumerate(active_warehouses):
+                d = self.haversine(cust['lat'], cust['lng'], wh['lat'], wh['lng'])
+                dist_data.append((i, d))
             
-        # Step 2: Routing for each active warehouse
+            # Find nearest active warehouse
+            nearest_idx, min_dist = min(dist_data, key=lambda x: x[1])
+            
+            if min_dist <= self.MAX_SERVICE_RADIUS:
+                assignments[nearest_idx].append(cust)
+            else:
+                unserviceable.append(cust['name'])
+            
+        # Step 2: Routing for each active warehouse group
         final_routes = []
         for idx, assigned_customers in assignments.items():
             if not assigned_customers: continue
@@ -257,7 +272,7 @@ class DeliveryRoutePlanner:
             route.append(wh) 
             final_routes.append({"warehouse": wh, "route": route})
             
-        return final_routes
+        return final_routes, unserviceable
 
     def start_ai_task(self):
         active_warehouses = [loc for loc in self.locations if loc['type'] == "Warehouse" and loc.get('active', True)]
@@ -274,11 +289,19 @@ class DeliveryRoutePlanner:
         self.is_animating = False
         self.log_text.delete(1.0, tk.END)
         self.log_text.insert(tk.END, f"> Found {len(active_warehouses)} Active Depots.\n")
+        self.log_text.insert(tk.END, f"> Applying {self.MAX_SERVICE_RADIUS}km service radius constraint...\n")
         self.progress['value'] = 0
         
         def run():
-            depot_routes = self.solve_multi_depot_assignment()
+            depot_routes, unserviceable = self.solve_multi_depot_assignment()
+            
+            if unserviceable:
+                self.log_text.insert(tk.END, f"> WARNING: {len(unserviceable)} node(s) exceed {self.MAX_SERVICE_RADIUS}km range:\n", "warning")
+                self.log_text.insert(tk.END, f"  - {', '.join(unserviceable)}\n", "warning")
+
             if not depot_routes:
+                if not unserviceable:
+                    self.log_text.insert(tk.END, "> No assignments possible.\n")
                 self.root.after(0, lambda: self.solve_btn.config(state=tk.NORMAL, text="RUN MULTI-DEPOT SERVICE ASSIGNMENT"))
                 return
 
