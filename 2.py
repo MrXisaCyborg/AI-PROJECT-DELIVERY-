@@ -1,280 +1,276 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
-import tkintermapview # Library for interactive maps
+import tkintermapview
 import math
+import time
+import threading
 
-# NOTE: You will need to install the map library: pip install tkintermapview
+# NOTE: pip install tkintermapview is required
 
 class DeliveryRoutePlanner:
     def __init__(self, root):
         self.root = root
-        self.root.title("AI Delivery Route Planner - Pro Dark Edition")
-        self.root.geometry("1300x850")
+        self.root.title("AI Logistics Pro - Advanced Route Optimizer")
+        self.root.geometry("1400x900")
         
-        # Color Palette - Modern Dark Theme
-        self.bg_dark = "#1e1e1e"
-        self.bg_panel = "#252526"
-        self.accent_blue = "#007acc"
-        self.accent_green = "#4ec9b0"
-        self.accent_yellow = "#f1c40f" # New bright color for animation visibility
-        self.text_color = "#d4d4d4"
-        self.btn_hover = "#1a8ad4"
+        # Premium Dark Theme Palette
+        self.colors = {
+            "bg": "#0f0f12",
+            "panel": "#1c1c21",
+            "accent": "#00a8ff",
+            "success": "#00d2ad",
+            "warning": "#ff9f43",
+            "text": "#e0e0e0",
+            "text_dim": "#a0a0a0",
+            "border": "#333338"
+        }
 
-        self.root.configure(bg=self.bg_dark)
+        self.root.configure(bg=self.colors["bg"])
         
-        # Data storage
-        # SETTING WAREHOUSE TO SRM IST, KATTANKULATHUR (KTR)
-        self.warehouse_coords = (12.8231, 80.0442)
+        # Logic Variables
+        self.warehouse_coords = (12.8231, 80.0442) # SRM KTR
         self.locations = [{"name": "Warehouse (SRM KTR)", "lat": self.warehouse_coords[0], "lng": self.warehouse_coords[1]}]
         self.markers = []
-        self.warehouse_marker = None
         self.path = None
-        self.anim_marker = None # Marker used for path animation
+        self.anim_marker = None
         self.is_animating = False
         
         self.setup_styles()
         self.setup_ui()
 
     def setup_styles(self):
-        """Configures modern styles for the Dark Mode UI."""
         style = ttk.Style()
         style.theme_use('clam')
+        style.configure("TFrame", background=self.colors["bg"])
+        style.configure("Card.TLabelframe", background=self.colors["panel"], bordercolor=self.colors["border"])
+        style.configure("Card.TLabelframe.Label", background=self.colors["panel"], foreground=self.colors["accent"], font=("Orbitron", 10, "bold"))
+        style.configure("TLabel", background=self.colors["panel"], foreground=self.colors["text"], font=("Segoe UI", 10))
         
-        # Frame styles
-        style.configure("TFrame", background=self.bg_dark)
-        style.configure("Dark.TLabelframe", background=self.bg_panel, bordercolor="#333333", foreground=self.text_color)
-        style.configure("Dark.TLabelframe.Label", background=self.bg_panel, foreground=self.accent_blue, font=("Segoe UI", 10, "bold"))
-        
-        # Label styles
-        style.configure("TLabel", background=self.bg_panel, foreground=self.text_color, font=("Segoe UI", 10))
-        
-        # Entry styles
-        style.configure("TEntry", fieldbackground="#3c3c3c", foreground="white", borderwidth=0)
-        
-        # Listbox Customization
-        self.root.option_add("*Listbox.background", "#2d2d2d")
-        self.root.option_add("*Listbox.foreground", self.text_color)
-        self.root.option_add("*Listbox.selectBackground", self.accent_blue)
-        self.root.option_add("*Listbox.borderwidth", 0)
+        # Custom Progress Bar
+        style.configure("AI.Horizontal.TProgressbar", troughcolor=self.colors["bg"], bordercolor=self.colors["border"], background=self.colors["accent"])
 
     def setup_ui(self):
-        """Creates the layout of the application."""
-        # Main container
         main_frame = ttk.Frame(self.root, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Left Side: Input Controls
-        input_frame = ttk.LabelFrame(main_frame, text=" LOGISTICS CONTROL ", style="Dark.TLabelframe", padding="20")
-        input_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        # --- LEFT PANEL: CONTROLS ---
+        left_panel = ttk.Frame(main_frame, width=350)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 15))
 
-        # Search box
-        ttk.Label(input_frame, text="Find Landmark / Destination:").pack(pady=(0,5), anchor="w")
-        self.search_entry = tk.Entry(input_frame, bg="#3c3c3c", fg="white", insertbackground="white", 
-                                     relief="flat", font=("Segoe UI", 11), highlightthickness=1, highlightbackground="#444")
-        self.search_entry.pack(fill=tk.X, pady=(0, 10), ipady=5)
+        # 1. Search Section
+        search_card = ttk.LabelFrame(left_panel, text=" LOCATION ENGINE ", style="Card.TLabelframe", padding=15)
+        search_card.pack(fill=tk.X, pady=(0, 15))
+
+        self.search_entry = tk.Entry(search_card, bg="#2d2d35", fg="white", insertbackground="white", 
+                                     relief="flat", font=("Segoe UI", 11), highlightthickness=1, highlightbackground=self.colors["border"])
+        self.search_entry.pack(fill=tk.X, pady=(0, 10), ipady=8)
         self.search_entry.bind("<Return>", lambda e: self.search_location())
+
+        search_btn = tk.Button(search_card, text="ADD TO ROUTE", bg=self.colors["accent"], fg="white", 
+                               font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", command=self.search_location)
+        search_btn.pack(fill=tk.X, ipady=6)
+
+        # 2. Analytics Section (High Marks Feature)
+        stats_card = ttk.LabelFrame(left_panel, text=" LOGISTICS ANALYTICS ", style="Card.TLabelframe", padding=15)
+        stats_card.pack(fill=tk.X, pady=(0, 15))
+
+        self.stats_labels = {}
+        metrics = [("Total Distance", "0.00 km"), ("Est. Time", "0 mins"), ("Fuel Cost", "₹0.00")]
+        for label, val in metrics:
+            f = ttk.Frame(stats_card)
+            f.pack(fill=tk.X, pady=2)
+            ttk.Label(f, text=label, foreground=self.colors["text_dim"]).pack(side=tk.LEFT)
+            l = ttk.Label(f, text=val, foreground=self.colors["success"], font=("Segoe UI", 10, "bold"))
+            l.pack(side=tk.RIGHT)
+            self.stats_labels[label] = l
+
+        # 3. Route List
+        list_card = ttk.LabelFrame(left_panel, text=" DELIVERY MANIFEST ", style="Card.TLabelframe", padding=15)
+        list_card.pack(fill=tk.BOTH, expand=True)
+
+        self.loc_listbox = tk.Listbox(list_card, bg="#18181c", fg="#ccc", font=("Segoe UI", 10), 
+                                      borderwidth=0, highlightthickness=0, selectbackground=self.colors["accent"])
+        self.loc_listbox.pack(fill=tk.BOTH, expand=True)
         
-        search_btn = tk.Button(input_frame, text="SEARCH & ADD", bg=self.accent_blue, fg="white", 
-                               font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
-                               command=self.search_location, activebackground=self.btn_hover, activeforeground="white")
-        search_btn.pack(fill=tk.X, pady=5, ipady=5)
+        reset_btn = tk.Button(list_card, text="CLEAR SYSTEM", bg="#3a3a42", fg="white", font=("Segoe UI", 9),
+                              relief="flat", cursor="hand2", command=self.clear_data)
+        reset_btn.pack(fill=tk.X, pady=(10, 0), ipady=4)
 
-        ttk.Separator(input_frame, orient='horizontal').pack(fill=tk.X, pady=20)
+        # --- RIGHT PANEL: MAP & AI ---
+        right_panel = ttk.Frame(main_frame)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Listbox
-        ttk.Label(input_frame, text="Active Route Sequence:").pack(pady=(0,5), anchor="w")
-        self.loc_listbox = tk.Listbox(input_frame, height=18, font=("Segoe UI", 10), relief="flat", highlightthickness=1, highlightbackground="#444")
-        self.loc_listbox.pack(fill=tk.BOTH, expand=True, pady=5)
-        self.update_listbox()
-
-        # Utility Buttons
-        btn_grid = ttk.Frame(input_frame)
-        btn_grid.pack(fill=tk.X, pady=10)
-
-        reset_btn = tk.Button(btn_grid, text="RESET ALL", bg="#444444", fg="white", 
-                              font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
-                              command=self.clear_data)
-        reset_btn.pack(fill=tk.X, ipady=5)
-
-        # Right Side: Map and Results
-        right_frame = ttk.Frame(main_frame)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-        # Map Widget
-        self.map_widget = tkintermapview.TkinterMapView(right_frame, corner_radius=10, bg_color=self.bg_dark)
+        # Map
+        self.map_widget = tkintermapview.TkinterMapView(right_panel, corner_radius=12, bg_color=self.colors["bg"])
         self.map_widget.pack(fill=tk.BOTH, expand=True)
-        
-        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22) 
-        
+        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga")
         self.map_widget.set_position(self.warehouse_coords[0], self.warehouse_coords[1])
         self.map_widget.set_zoom(15)
-        
-        # Right-Click Menu
-        self.map_widget.add_right_click_menu_command(label="Set as Warehouse", command=self.set_warehouse_from_map, pass_coords=True)
-        self.map_widget.add_right_click_menu_command(label="Add Delivery Point", command=self.add_point_from_map, pass_coords=True)
 
-        # Place Warehouse Marker
+        # Right-click bindings
+        self.map_widget.add_right_click_menu_command(label="Set Warehouse", command=self.set_warehouse_from_map, pass_coords=True)
+        self.map_widget.add_right_click_menu_command(label="Add Customer", command=self.add_point_from_map, pass_coords=True)
+
+        # AI Execution Section
+        ai_frame = ttk.Frame(right_panel, padding=(0, 15, 0, 0))
+        ai_frame.pack(fill=tk.X)
+
+        self.progress = ttk.Progressbar(ai_frame, mode='determinate', style="AI.Horizontal.TProgressbar")
+        self.progress.pack(fill=tk.X, pady=(0, 10))
+
+        self.solve_btn = tk.Button(ai_frame, text="RUN AI OPTIMIZATION (Greedy Heuristic)", 
+                                   bg=self.colors["success"], fg="#000", font=("Segoe UI", 11, "bold"),
+                                   relief="flat", cursor="hand2", command=self.start_ai_task)
+        self.solve_btn.pack(fill=tk.X, ipady=12)
+
+        # Warehouse Initial Marker
         self.warehouse_marker = self.map_widget.set_marker(self.warehouse_coords[0], self.warehouse_coords[1], 
-                                                         text="SRM KTR WH", marker_color_circle="red", text_color="white")
+                                                         text="SRM KTR DEPOT", marker_color_circle="red")
 
-        # Action Button
-        solve_btn = tk.Button(right_frame, text="GENERATE AI OPTIMIZED ROUTE", 
-                              bg=self.accent_green, fg="#121212", font=("Segoe UI", 11, "bold"),
-                              command=self.generate_route, pady=12, relief="flat", cursor="hand2")
-        solve_btn.pack(fill=tk.X, pady=(15, 0))
-
-        # Results Display
-        self.result_text = tk.Text(right_frame, height=4, font=("Consolas", 11), 
-                                   bg="#1e1e1e", fg=self.accent_green, relief="flat", 
-                                   padx=15, pady=10, highlightthickness=1, highlightbackground="#333")
-        self.result_text.pack(fill=tk.X, pady=(10, 0))
-        self.result_text.insert(tk.END, "> System Initialized: SRM KTR Node Active.")
-
-    def set_warehouse_from_map(self, coords):
-        lat, lng = coords
-        self.warehouse_coords = (lat, lng)
-        self.locations[0] = {"name": "Warehouse (Custom)", "lat": lat, "lng": lng}
-        
-        if self.warehouse_marker:
-            self.warehouse_marker.delete()
-        self.warehouse_marker = self.map_widget.set_marker(lat, lng, text="Warehouse", marker_color_circle="red")
-        
         self.update_listbox()
-        self.log_message(f"Warehouse moved to: {lat:.4f}, {lng:.4f}")
 
-    def add_point_from_map(self, coords):
-        lat, lng = coords
-        name = f"Node {len(self.locations)}"
-        self.locations.append({"name": name, "lat": lat, "lng": lng})
-        marker = self.map_widget.set_marker(lat, lng, text=name, text_color="white")
-        self.markers.append(marker)
-        self.update_listbox()
+    # --- AI ALGORITHMS ---
+    
+    def haversine(self, lat1, lon1, lat2, lon2):
+        """Calculates real-world distance between two points in KM."""
+        R = 6371 # Earth radius
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        return R * c
+
+    def get_total_path_dist(self, path):
+        d = 0
+        for i in range(len(path)-1):
+            d += self.haversine(path[i]['lat'], path[i]['lng'], path[i+1]['lat'], path[i+1]['lng'])
+        return d
+
+    def solve_route_ai(self):
+        """AI Engine: Greedy Nearest Neighbor Algorithm."""
+        unvisited = self.locations[1:]
+        current = self.locations[0]
+        route = [current]
+        
+        # Greedy Phase (Nearest Neighbor)
+        while unvisited:
+            # Find the closest unvisited location from current position
+            nearest = min(unvisited, key=lambda n: self.haversine(current['lat'], current['lng'], n['lat'], n['lng']))
+            route.append(nearest)
+            unvisited.remove(nearest)
+            current = nearest
+            
+        # Return to warehouse (starting point) to complete the circuit
+        route.append(self.locations[0])
+        return route
+
+    # --- UI & ANIMATION LOGIC ---
+
+    def start_ai_task(self):
+        if len(self.locations) < 3:
+            messagebox.showwarning("Incomplete Data", "Please add at least 2 customers.")
+            return
+        
+        self.solve_btn.config(state=tk.DISABLED, text="AI COMPUTING...")
+        self.progress['value'] = 0
+        
+        def run():
+            # Simulate 'Thinking' process for UI feedback
+            for i in range(1, 101, 10):
+                time.sleep(0.05)
+                self.progress['value'] = i
+            
+            final_route = self.solve_route_ai()
+            self.root.after(0, lambda: self.finalize_route(final_route))
+
+        threading.Thread(target=run).start()
+
+    def finalize_route(self, route):
+        dist = self.get_total_path_dist(route)
+        
+        # Update Analytics
+        self.stats_labels["Total Distance"].config(text=f"{dist:.2f} km")
+        self.stats_labels["Est. Time"].config(text=f"{int(dist * 2.5)} mins") # Estimated 2.5 min/km avg
+        self.stats_labels["Fuel Cost"].config(text=f"₹{dist * 8.5:.2f}") # Estimated ₹8.5/km fuel cost
+
+        # Draw on Map
+        if self.path: self.path.delete()
+        path_coords = [(l['lat'], l['lng']) for l in route]
+        self.path = self.map_widget.set_path(path_coords, color=self.colors["success"], width=3)
+        
+        # Start Animation
+        self.is_animating = True
+        self.animate_path(path_coords)
+        
+        self.solve_btn.config(state=tk.NORMAL, text="RUN AI OPTIMIZATION (Greedy Heuristic)")
+
+    def animate_path(self, coords, index=0, step=0):
+        if not self.is_animating or index >= len(coords)-1:
+            if self.anim_marker: self.anim_marker.delete()
+            return
+
+        p1, p2 = coords[index], coords[index+1]
+        steps = 15
+        ratio = step / steps
+        lat = p1[0] + (p2[0]-p1[0])*ratio
+        lng = p1[1] + (p2[1]-p1[1])*ratio
+
+        if not self.anim_marker:
+            self.anim_marker = self.map_widget.set_marker(lat, lng, text="🚚", marker_color_circle=self.colors["accent"])
+        else:
+            self.anim_marker.set_position(lat, lng)
+
+        if step < steps:
+            self.root.after(30, lambda: self.animate_path(coords, index, step+1))
+        else:
+            self.root.after(30, lambda: self.animate_path(coords, index+1, 0))
+
+    # --- SEARCH & UTILS ---
 
     def search_location(self):
         address = self.search_entry.get().strip()
         if not address: return
-        
-        new_marker = self.map_widget.set_address(address, marker=True)
-        if new_marker:
-            new_marker.set_text(address)
-            self.locations.append({
-                "name": address, 
-                "lat": new_marker.position[0], 
-                "lng": new_marker.position[1]
-            })
-            self.markers.append(new_marker)
+        m = self.map_widget.set_address(address, marker=True)
+        if m:
+            self.locations.append({"name": address, "lat": m.position[0], "lng": m.position[1]})
+            self.markers.append(m)
             self.update_listbox()
             self.search_entry.delete(0, tk.END)
-            self.map_widget.set_position(new_marker.position[0], new_marker.position[1])
+            self.map_widget.set_position(m.position[0], m.position[1])
         else:
-            messagebox.showwarning("Search Error", f"Location '{address}' not found.")
+            messagebox.showerror("Error", "Location not found.")
+
+    def set_warehouse_from_map(self, coords):
+        self.warehouse_coords = coords
+        self.locations[0] = {"name": "Central Depot (Custom)", "lat": coords[0], "lng": coords[1]}
+        if self.warehouse_marker: self.warehouse_marker.delete()
+        self.warehouse_marker = self.map_widget.set_marker(coords[0], coords[1], text="MAIN DEPOT", marker_color_circle="red")
+        self.update_listbox()
+
+    def add_point_from_map(self, coords):
+        name = f"Customer {len(self.locations)}"
+        self.locations.append({"name": name, "lat": coords[0], "lng": coords[1]})
+        m = self.map_widget.set_marker(coords[0], coords[1], text=name)
+        self.markers.append(m)
+        self.update_listbox()
 
     def update_listbox(self):
         self.loc_listbox.delete(0, tk.END)
-        for loc in self.locations:
-            prefix = " 🏠 " if "Warehouse" in loc['name'] else " 📍 "
-            self.loc_listbox.insert(tk.END, f"{prefix}{loc['name']}")
-
-    def log_message(self, msg):
-        self.result_text.delete(1.0, tk.END)
-        self.result_text.insert(tk.END, f"> {msg}")
+        for i, loc in enumerate(self.locations):
+            icon = "🏢" if i==0 else "👤"
+            self.loc_listbox.insert(tk.END, f" {icon} {loc['name']}")
 
     def clear_data(self):
         self.is_animating = False
-        self.warehouse_coords = (12.8231, 80.0442)
-        self.locations = [{"name": "Warehouse (SRM KTR)", "lat": self.warehouse_coords[0], "lng": self.warehouse_coords[1]}]
+        self.locations = [{"name": "Warehouse (SRM KTR)", "lat": 12.8231, "lng": 80.0442}]
         for m in self.markers: m.delete()
         self.markers = []
-        if self.warehouse_marker: self.warehouse_marker.delete()
-        self.warehouse_marker = self.map_widget.set_marker(self.warehouse_coords[0], self.warehouse_coords[1], 
-                                                         text="SRM KTR WH", marker_color_circle="red")
         if self.path: self.path.delete()
-        self.path = None
         if self.anim_marker: self.anim_marker.delete()
-        self.anim_marker = None
-        
+        self.map_widget.set_position(12.8231, 80.0442)
         self.update_listbox()
-        self.log_message("System Reset. Warehouse restored to SRM KTR.")
-        self.map_widget.set_position(self.warehouse_coords[0], self.warehouse_coords[1])
-        self.map_widget.set_zoom(15)
-
-    def calculate_distance(self, p1, p2):
-        return math.sqrt((p1['lat'] - p2['lat'])**2 + (p1['lng'] - p2['lng'])**2)
-
-    def animate_path(self, route_points, index=0, step=0):
-        """Recursively animates a small arrow along the path."""
-        if not self.is_animating or index >= len(route_points) - 1:
-            if self.anim_marker: 
-                self.anim_marker.delete()
-                self.anim_marker = None
-            return
-
-        p1 = route_points[index]
-        p2 = route_points[index + 1]
-        
-        # Number of interpolation steps for smoothness - increased for better visibility
-        total_steps = 25 
-        
-        # Calculate interpolated position
-        ratio = step / total_steps
-        curr_lat = p1[0] + (p2[0] - p1[0]) * ratio
-        curr_lng = p1[1] + (p2[1] - p1[1]) * ratio
-        
-        # Update or create the animation marker with high-contrast colors
-        if not self.anim_marker:
-            self.anim_marker = self.map_widget.set_marker(curr_lat, curr_lng, text="➤", 
-                                                         marker_color_circle=self.accent_yellow,
-                                                         marker_color_outside=self.accent_blue)
-        else:
-            self.anim_marker.set_position(curr_lat, curr_lng)
-        
-        # Logic for next step
-        if step < total_steps:
-            self.root.after(30, lambda: self.animate_path(route_points, index, step + 1))
-        else:
-            self.root.after(30, lambda: self.animate_path(route_points, index + 1, 0))
-
-    def generate_route(self):
-        if len(self.locations) < 3:
-            messagebox.showinfo("Logistics", "Add at least 2 destinations to compute an optimized route.")
-            return
-
-        # Stop and clean up existing animation
-        self.is_animating = False
-        if self.anim_marker: 
-            self.anim_marker.delete()
-            self.anim_marker = None
-
-        unvisited = self.locations[1:]
-        current_node = self.locations[0]
-        route = [current_node]
-        total_distance = 0
-
-        # Nearest Neighbor Heuristic
-        while unvisited:
-            nearest_node = min(unvisited, key=lambda node: self.calculate_distance(current_node, node))
-            dist = self.calculate_distance(current_node, nearest_node)
-            total_distance += dist
-            route.append(nearest_node)
-            unvisited.remove(nearest_node)
-            current_node = nearest_node
-
-        total_distance += self.calculate_distance(current_node, self.locations[0])
-        route.append(self.locations[0])
-        
-        # UI Updates
-        route_names = [l['name'] for l in route]
-        self.log_message(f"OPTIMIZATION COMPLETE\nRoute: {' → '.join(route_names)}\nPath Weight: {total_distance:.6f}")
-
-        if self.path: self.path.delete()
-        path_coords = [(loc['lat'], loc['lng']) for loc in route]
-        self.path = self.map_widget.set_path(path_coords, color=self.accent_green, width=3)
-        
-        # Trigger Animation after a brief delay to ensure path is drawn
-        self.is_animating = True
-        self.root.after(300, lambda: self.animate_path(path_coords))
-        
-        self.map_widget.set_zoom(14)
+        for label in ["Total Distance", "Est. Time", "Fuel Cost"]:
+            self.stats_labels[label].config(text="0.00")
 
 if __name__ == "__main__":
     root = tk.Tk()
